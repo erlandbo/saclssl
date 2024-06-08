@@ -312,6 +312,8 @@ def build_dataset(
 
 # For tinyImagenet
 # https://github.com/DennisHanyuanXu/Tiny-ImageNet/blob/master/src/data_prep.py
+# Download tiny-imagenet dataset 
+# Run python data.py
 def create_val_img_folder(data_dir, dataset):
     '''
     This method is responsible for separating validation images into separate sub folders
