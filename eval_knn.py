@@ -106,7 +106,7 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     parser.add_argument('--nn_k', default=200, type=int, help='k-nearest neighbors')
-    parser.add_argument('--temp', default=0.5, type=float, help='Temperature cosine similarity exp(cossim/temp)')
+    parser.add_argument('--temp', default=0.07, type=float, help='Temperature cosine similarity exp(cossim/temp)')
     parser.add_argument('--eps', default=1e-8, type=float, help='Epsilon for inverse euclidean weighting')
     parser.add_argument('--fx_distance', default="cosine", type=str,choices=["cosine", "euclidean"], help='Function for computing distance')
     parser.add_argument('--weights', default="distance", type=str,choices=["distance", "uniform"], help='Weights computing distance')
