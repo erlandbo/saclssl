@@ -1,10 +1,8 @@
 import torch
 from torch.utils.data import DataLoader
 import argparse
-import sys
 import time
 import os
-import logging
 from data import build_dataset
 from networks import get_arch2infeatures, SimCLRNet
 from criterions.scl import SCL
@@ -12,12 +10,12 @@ from criterions.sacl_batchmix import SACLBatchMix
 from criterions.sacl import SACL
 import torchvision
 from torch import nn
-from eval_knn import KNNEvaluator
 from criterions.simclr import SimCLRLoss
 from utils import load_pretrained_weights, save_checkpoint, AvgMetricMeter
 import math
 import wandb
 import numpy as np
+import pandas as pd
 
 
 def main_train():
@@ -25,42 +23,20 @@ def main_train():
     parser = get_main_parser()
     args = parser.parse_args()
 
-    if args.sweep_hparams:
-        run = wandb.init()
-        print("wandb config", wandb.config)
-        args.__dict__.update(wandb.config)
-
     print("Loaded args", args)
-    contrastive_train_dataset, contrastive_val_dataset, contrastive_test_dataset, NUM_CLASSES = build_dataset(
+    contrastive_train_dataset, _, _, NUM_CLASSES = build_dataset(
         args.dataset,
         train_transform_mode="contrastive_pretrain",
         val_split=args.val_split,
         random_state=args.random_state
     )
 
-    print("SSL Trainsize:{} Valsize:{}".format( len(contrastive_train_dataset), len(contrastive_val_dataset)))
-
     trainloader = DataLoader(contrastive_train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=False)
-
-    knn_train_dataset, knn_val_dataset, knn_test_dataset, knn_NUM_CLASSES = build_dataset(
-        args.dataset,
-        train_transform_mode="test_classifier",
-        val_transform_mode="test_classifier",
-        test_transform_mode="test_classifier",
-        val_split=args.val_split,
-        random_state=args.random_state
-    )
-
-    print("KNN Trainsize:{} Valsize:{}".format( len(knn_train_dataset), len(knn_val_dataset)))
-
-    knn_trainloader = DataLoader(knn_train_dataset, batch_size=args.batch_size, shuffle=True,num_workers=args.num_workers,pin_memory=True, drop_last=False)
-    knn_valloader = DataLoader(knn_val_dataset, batch_size=args.batch_size, shuffle=False,num_workers=args.num_workers,pin_memory=True, drop_last=False)
 
     if args.lr_scale == "linear":
         lr = args.base_lr * args.batch_size / 256.0
     elif args.lr_scale == "squareroot":
         lr = args.base_lr * math.sqrt(args.batch_size / 256.0)
-        # lr = 0.075 * args.batch_size ** 0.5
     elif args.lr_scale == "no_scale":
         lr = args.base_lr
     else:
@@ -98,15 +74,11 @@ def main_train():
     if not os.path.exists(args.savedir):
         os.makedirs(args.savedir)
 
-    logging.shutdown()
-    logging.basicConfig(format='%(message)s', filename=args.savedir + "/train.log", level=logging.INFO)
-
     print("Updated args", args)
 
     # Initialize with updated args
     if args.wandb_logging:
-        # run = wandb.init(project=f"{args.criterion}_{args.dataset}", config=args.__dict__)
-        project = f"{args.criterion}_{args.dataset}" if args.wandb_project_name == "" else args.wandb_project_name
+        project = f"{args.criterion}_{args.dataset}"
         run = wandb.init(project=project, config=args.__dict__)
 
     backbone = torchvision.models.__dict__[args.arch](zero_init_residual=args.zero_init_residual)
@@ -233,6 +205,8 @@ def main_train():
 
     torch.backends.cudnn.benchmark = True
 
+    train_df = pd.DataFrame(columns=["epoch_time","epoch","lr","train_loss","rho","Z_hat","E_attr","E_rep"])
+
     for epoch in range(start_epoch, args.epochs + 1):
         start_time = time.time()
 
@@ -289,6 +263,7 @@ def main_train():
         epoch_loss = loss_metric.compute_global()
 
         train_stats = {
+            "epoch_time": time.time() - start_time,
             "epoch": epoch,
             "lr": lr_scheduler[epoch],
             "train_loss": epoch_loss,
@@ -298,31 +273,9 @@ def main_train():
             "E_rep": criterion.criterion.E_rep.item() if args.criterion in ["scl", "sacl", "sacl_batchmix"] else 0.0,
         }
 
-        if epoch % args.validate_interval == 0:
-            val_acc = KNNEvaluator(
-                knn_NUM_CLASSES,
-                feature_type=args.knn_feature_type,
-                k=args.knn_k,
-                fx_distance=args.knn_fx_distance,
-                weights=args.knn_weights,
-                eps=args.knn_eps,
-                temp=args.knn_temp
-            ).fit_predict(model, knn_trainloader, knn_valloader)
-            train_stats["val_acc"] = val_acc
-            # Save checkpoint
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
-                save_checkpoint(model, optimizer, scaler, criterion, lr_scheduler, epoch, best_val_acc, args, filename="/checkpoint_best.pth")
+        print(" ".join(("{key}:{val}".format(key=key, val=val)) for key, val in train_stats.items()))
 
-        if args.sweep_hparams or args.wandb_logging:
-            wandb.log({key: val for key, val in train_stats.items()})
-
-        train_stats_string = " ".join(("{key}:{val}".format(key=key, val=val)) for key, val in train_stats.items())
-        train_stats_string = "time:{} ".format(time.time() - start_time) + train_stats_string
-        if not args.sweep_hparams:
-            logging.info(train_stats_string)
-
-        print(train_stats_string)
+        train_df.loc[len(train_df)] = train_stats
 
         # Save checkpoint
         if epoch % args.checkpoint_interval == 0:
@@ -332,6 +285,7 @@ def main_train():
 
     # Save last checkpoint
     save_checkpoint(model, optimizer, scaler, criterion, lr_scheduler, epoch, best_val_acc, args, filename="/checkpoint_last.pth")
+    train_df.to_csv(args.savedir + "/train_df.csv")
 
 
 def get_main_parser():
@@ -379,17 +333,8 @@ def get_main_parser():
     parser.add_argument('--logdir', type=str, default='logs/pretrain', help='log directory')
     parser.add_argument('--checkpoint_interval', default=100, type=int)
     parser.add_argument('--resume_checkpoint_path', default=None, type=str)
-    # kNN validation
     parser.add_argument('--validate_interval', default=100, type=int)
-    parser.add_argument('--knn_k', default=200, type=int, help='k-nearest neighbors')
-    parser.add_argument('--knn_temp', default=0.5, type=float, help='Temperature cosine similarity exp(cossim/temp)')
-    parser.add_argument('--knn_eps', default=1e-8, type=float, help='Epsilon for inverse euclidean weighting')
-    parser.add_argument('--knn_fx_distance', default="cosine", type=str,choices=["cosine", "euclidean"], help='Function for computing distance')
-    parser.add_argument('--knn_weights', default="distance", type=str,choices=["distance", "uniform"], help='Weights computing distance')
-    parser.add_argument('--knn_feature_type', default="backbone_features", type=str,choices=["backbone_features", "output_features"], help='Weights computing distance')
     # Wandb
-    parser.add_argument('--sweep_hparams', default=False, action=argparse.BooleanOptionalAction, help="wandb sweep hyperparameters. Must be run from search_wandb.py")
-    parser.add_argument('--wandb_project_name', default='', type=str, help="Default use project name: criterion_metric_dataset")
     parser.add_argument('--wandb_logging', default=False, action=argparse.BooleanOptionalAction)
 
     return parser

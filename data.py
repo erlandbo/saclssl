@@ -209,7 +209,7 @@ def build_dataset(
             train_dataset = SubsetIndex(train_dataset, train_idx)
             val_dataset = SubsetIndex(val_dataset, val_idx)
             # Indexed test-dataset
-            test_dataset = CIFAR10Index(root='./data',download=True,train=False,transform=CIFARAugmentations(imgsize=IMGSIZE,mean=MEAN, std=STD, mode=test_transform_mode))
+            test_dataset = val_dataset
             return train_dataset, val_dataset, test_dataset, NUM_CLASSES
 
     elif dataset_name == 'cifar100':
@@ -237,7 +237,7 @@ def build_dataset(
             train_dataset = SubsetIndex(train_dataset, train_idx)
             val_dataset = SubsetIndex(val_dataset, val_idx)
             # Indexed test-dataset
-            test_dataset = CIFAR100Index(root='./data',download=True,train=False,transform=CIFARAugmentations(imgsize=IMGSIZE,mean=MEAN, std=STD, mode=test_transform_mode))
+            test_dataset = val_dataset
 
             return train_dataset, val_dataset, test_dataset, NUM_CLASSES
 
@@ -266,7 +266,7 @@ def build_dataset(
             train_dataset = SubsetIndex(train_dataset, train_idx)
             val_dataset = SubsetIndex(val_dataset, val_idx)
             # Indexed test-dataset
-            test_dataset = ImageNetIndex(root="./data/tiny-imagenet-200/val/images", transform=CIFARAugmentations(imgsize=IMGSIZE,mean=MEAN, std=STD, mode=test_transform_mode))
+            test_dataset = val_dataset
 
             return train_dataset, val_dataset, test_dataset, NUM_CLASSES
 
@@ -306,7 +306,7 @@ def build_dataset(
                 val_dataset = STL10Index(root='./data',download=True,split="train", transform=CIFARAugmentations(imgsize=IMGSIZE, mean=MEAN, std=STD, mode=val_transform_mode))
 
             # Indexed test-dataset
-            test_dataset = STL10Index(root='./data',download=True, split="test",transform=CIFARAugmentations(imgsize=IMGSIZE,mean=MEAN, std=STD, mode=test_transform_mode))
+            test_dataset = val_dataset
 
             return train_dataset, val_dataset, test_dataset, NUM_CLASSES
 

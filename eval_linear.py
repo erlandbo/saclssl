@@ -24,10 +24,13 @@ def validate(backbone, classifier, criterion, loader):
         with torch.no_grad():
             backbone_feats = backbone(x)
         logits = classifier(backbone_feats.detach())
+
         loss = criterion(logits, target)
-        acc = (torch.argmax(logits, dim=1) == target).float().sum() / target.shape[0]
         loss_metric.update(loss.item(), n=target.shape[0])
-        acc_metric.update(acc.item(), n=target.shape[0])
+
+        correct = torch.argmax(logits, dim=1) == target
+        acc = torch.sum(correct.float()) / correct.shape[0]
+        acc_metric.update(acc.item(), correct.size(0))
 
     return loss_metric, acc_metric
 
@@ -37,7 +40,6 @@ def main_linear():
 
     parser.add_argument('--batch_size', default=256, type=int)
     parser.add_argument('--base_lr', default=30, type=float,help='linearly scale lr with batch-size')
-    parser.add_argument('--min_lr', default=0.0, type=float,help='')
     parser.add_argument('--momentum', default=0.9, type=float)
     parser.add_argument('--weight_decay', default=0.0, type=float)
     parser.add_argument('--lr_anneal', default="cosine", choices=["cosine", "no_anneal", "multi_step"])
@@ -46,27 +48,20 @@ def main_linear():
     parser.add_argument('--lr_anneal_steps', default=[70, 90], nargs='+', type=int,)
     parser.add_argument('--lr_anneal_steps_constant', default=0.25, type=float)
     parser.add_argument('--epochs', default=90, type=int)
-    parser.add_argument('--warmup_epochs', default=0, type=int)
     parser.add_argument('--num_workers', default=20, type=int)
 
     parser.add_argument('--dataset', default='tinyimagenet', type=str, choices=["cifar10", "cifar100", "tinyimagenet", "stl10"])
 
     parser.add_argument('--backbone_checkpoint_path', required=True, type=str, help="path to model weights")
-    parser.add_argument('--resume_checkpoint_path', type=str)
 
     parser.add_argument('--use_fp32', default=True, action=argparse.BooleanOptionalAction)
 
-    parser.add_argument('--checkpoint_interval', default=50, type=int)
     parser.add_argument('--validate_interval', default=1, type=int)
-
-    parser.add_argument('--log_dir', type=str, default='logs/linear', help='log directory')
-
-    parser.add_argument('--wandb_logging', default=False, action=argparse.BooleanOptionalAction)
-    # parser.add_argument('--sweep_hparams', default=False, action=argparse.BooleanOptionalAction)
 
     parser.add_argument('--dropout', default=0.0, type=float)
     parser.add_argument('--val_split', default=0.0, type=float)
     parser.add_argument('--random_state', default=42, type=int)
+    parser.add_argument('--wandb_logging', type=bool, default=False)
 
     args = parser.parse_args()
 
@@ -85,24 +80,8 @@ def main_linear():
     valloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=False)
     testloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=False)
 
-    args.savedir = args.log_dir + "/{current_time}_{dataset}_{batchsize}_epochs_{epochs}_lr{lr}_wd{wd}_{backbone_checkpoint_path}".format(
-        current_time=time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime()),
-        dataset=args.dataset,
-        batchsize=args.batch_size,
-        epochs=args.epochs,
-        lr=args.lr,
-        backbone_checkpoint_path="_".join(args.backbone_checkpoint_path.split("/")[-2:]).replace(".", "")[-150:],
-        wd=args.weight_decay
-    )
-
     if args.wandb_logging:
         run = wandb.init(project="linear_" + args.dataset, config=args.__dict__)
-
-    if not os.path.exists(args.savedir):
-        os.makedirs(args.savedir)
-
-    logging.shutdown()
-    logging.basicConfig(format='%(message)s', filename=args.savedir + "/train.log", level=logging.INFO)
 
     print(args)
 
@@ -161,10 +140,9 @@ def main_linear():
     print(optimizer)
 
     if args.lr_anneal == "cosine":
-        T_max = (args.epochs - args.warmup_epochs)
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max, eta_min=args.min_lr)
+        T_max = args.epochs
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
     elif args.lr_anneal == "multi_step":
-        T_max = (args.epochs - args.warmup_epochs)
         lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_anneal_steps, gamma=args.lr_anneal_steps_constant)
     elif args.lr_anneal == "no_anneal":
         lr_scheduler = None
@@ -177,18 +155,6 @@ def main_linear():
     criterion.cuda()
 
     start_epoch = 1
-    best_val_acc = 0.0
-
-    if args.resume_checkpoint_path is not None:
-        resume_checkpoint = torch.load(args.resume_checkpoint_path is not None)
-        backbone.load_state_dict(resume_checkpoint['backbone_state_dict'])
-        linear_classifier.load_state_dict(resume_checkpoint['linear_classifier_state_dict'])
-        criterion.load_state_dict(resume_checkpoint['criterion_state_dict'])
-        lr_scheduler = resume_checkpoint['lr_scheduler']
-        scaler.load_state_dict(resume_checkpoint['scaler_state_dict'])
-        start_epoch = resume_checkpoint['epoch']
-        best_val_acc = resume_checkpoint['best_val_acc']
-        print("Loaded model weights from resume checkpoint from {}".format(args.resume_checkpoint_path is not None))
 
     torch.backends.cudnn.benchmark = True
 
@@ -225,9 +191,10 @@ def main_linear():
                 optimizer.step()
 
             loss_metric.update(loss.item(), x.size(0))
-            assert torch.argmax(logits, dim=1).shape == target.shape, "logits target different"
-            train_acc = (torch.argmax(logits, dim=1) == target).float().sum() / target.size(0)
-            acc_metric.update(train_acc.item(), target.size(0))
+            correct = torch.argmax(logits, dim=1) == target
+            acc = torch.sum(correct.float()) / correct.shape[0]
+            #train_acc = (torch.argmax(logits, dim=1) == target).float().sum() / target.size(0)
+            acc_metric.update(acc.item(), correct.size(0))
 
             if not math.isfinite(loss.item()):
                 print("Break training infinity value in loss")
@@ -239,42 +206,18 @@ def main_linear():
             lr_scheduler.step()
 
         # Validate
-        if epoch % args.validate_interval == 0:
+        if args.val_split > 0.0 and epoch % args.validate_interval == 0:
             val_loss_metric, val_acc_metric = validate(backbone, linear_classifier, criterion, valloader)
             train_stats["val_loss"] = val_loss_metric.compute_global()
             train_stats["val_acc"] = val_acc_metric.compute_global()
 
-            if train_stats["val_acc"] > best_val_acc:
-                best_val_acc = train_stats["val_acc"]
-
-                save_checkpoint_linear(backbone, linear_classifier, optimizer, scaler, criterion, lr_scheduler, epoch, best_val_acc, args, filename="/checkpoint_best.pth")
-
         if args.wandb_logging:
             wandb.log({key: val for key, val in train_stats.items()})
 
-        train_stats_string = " ".join(("{key}:{val}".format(key=key, val=val)) for key, val in train_stats.items())
-        logging.info(train_stats_string)
-        print(train_stats_string)
-
-        if epoch % args.checkpoint_interval == 0:
-            save_checkpoint_linear(backbone, linear_classifier, optimizer, scaler, criterion, lr_scheduler, epoch, best_val_acc, args, )
+        print(" ".join(("{key}:{val}".format(key=key, val=val)) for key, val in train_stats.items()))
 
         loss_metric.reset()
         acc_metric.reset()
-
-    print("Best val acc: {}".format(best_val_acc))
-    logging.info("Best val acc: {}".format(best_val_acc))
-
-    # Save last checkpoint
-    save_checkpoint_linear(backbone, linear_classifier, optimizer, scaler, criterion, lr_scheduler, epoch, best_val_acc, args,  filename="/checkpoint_last.pth")
-
-    ###########################################
-    # Test classifier
-    # best_checkpoint = torch.load(args.savedir + "/checkpoint_best.pth")
-    # linear_classifier.load_state_dict(best_checkpoint["linear_classifier_state_dict"])
-    # backbone.load_state_dict(best_checkpoint["backbone_state_dict"])  # if optimizing backbone
-    # linear_classifier.cuda()
-    # backbone.cuda()
 
     test_loss_metric, test_acc_metric = validate(
         backbone,
@@ -284,7 +227,6 @@ def main_linear():
     )
     test_stats = {"test_loss": test_loss_metric.compute_global(), "test_acc": test_acc_metric.compute_global()}
     print(" ".join(("{key}:{val}".format(key=key, val=val)) for key, val in test_stats.items()))
-    logging.info(" ".join(("{key}:{val}".format(key=key, val=val)) for key, val in test_stats.items()))
     if args.wandb_logging:
         wandb.log({key: val for key, val in test_stats.items()})
 
