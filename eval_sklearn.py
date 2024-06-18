@@ -283,7 +283,7 @@ def main():
 
     model_checkpoint = torch.load(args.model_checkpoint_path)
     model_args = model_checkpoint['args']
-    print("Model args: {}".format(model_args))
+    # print("Model args: {}".format(model_args))
 
     backbone = torchvision.models.__dict__[model_args.arch](zero_init_residual=model_args.zero_init_residual)
     backbone.fc = nn.Identity()
@@ -306,7 +306,7 @@ def main():
     ).cuda()
 
     model.load_state_dict(model_checkpoint["model_state_dict"])
-    print("Loading model from {}".format(args.model_checkpoint_path))
+    # print("Loading model from {}".format(args.model_checkpoint_path))
 
     model.eval()
 

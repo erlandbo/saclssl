@@ -164,3 +164,4 @@ data/
 logs/
 *.ipynb
 wandb/
+old_scripts/

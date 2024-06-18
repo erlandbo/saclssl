@@ -2,12 +2,10 @@ import torch
 from torch.utils.data import DataLoader, ConcatDataset
 import matplotlib.pyplot as plt
 import argparse
-
 from data import build_dataset
 import torchvision
 from torch import nn
 from networks import SimCLRNet
-from sklearn.manifold import TSNE
 import os
 
 
@@ -15,17 +13,12 @@ def main():
 
     parser = argparse.ArgumentParser(description='eval visualization')
 
-    torch.backends.cudnn.benchmark = True
-
     parser.add_argument('--batch_size', default=1024, type=int)
     parser.add_argument('--num_workers', default=20, type=int)
     parser.add_argument('--dataset', default='tinyimagenet', type=str, choices=["cifar10", "cifar100", "stl10", "tinyimagenet"])
     parser.add_argument('--feature_type', default='output_features', type=str, choices=["backbone_features", "output_features"], help='feature type to visualize')
 
     parser.add_argument('--model_checkpoint_path', required=True, type=str, help="path to model weights")
-
-    parser.add_argument('--vis_method', default='raw', type=str, choices=["tsne", "umap", "raw"], help="visualization method; use raw for visulization of raw 2d output")
-    parser.add_argument('--filename', default='', type=str, help="Use savedir from model-checkpoint for filename, alternateivly specify filename for visualization")
 
     args = parser.parse_args()
 
@@ -41,7 +34,7 @@ def main():
     )
 
     visualize_dataset = ConcatDataset([train_dataset, test_dataset])
-    loader = DataLoader(visualize_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=False)
+    loader = DataLoader(visualize_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True, drop_last=False)
 
     model_checkpoint = torch.load(args.model_checkpoint_path)
     model_args = model_checkpoint['args']
@@ -80,35 +73,25 @@ def main():
             output_feature, backbone_feature = model(x)
             if args.feature_type == "output_features":
                 feature = output_feature
-            else:
+            elif args.feature_type == "backbone_features":
                 feature = backbone_feature
+            else:
+                raise ValueError("Unknown feature type", args.feature_type)
+
             feature_bank.append(feature)
             target_bank.append(target)
 
         feature_bank = torch.cat(feature_bank, dim=0).cpu().numpy()
         target_bank = torch.cat(target_bank, dim=0).cpu().numpy()
 
-    if args.vis_method == "tsne":
-        vis_output = TSNE(n_components=2, perplexity=50, n_jobs=-1).fit_transform(feature_bank)
-    elif args.vis_method == "umap":
-        vis_output = UMAP(n_components=2, n_neighbors=50, n_jobs=-1).fit_transform(feature_bank)
-    elif args.vis_method == "raw":
-        vis_output = feature_bank
-    else:
-        raise ValueError("Unsupported visualization method", args.vis_method)
-
-    assert vis_output.shape[-1] == 2, "Features must be in 2D for visualization"
+    assert feature_bank.shape[-1] == 2, "Features must be in 2d for visualization"
 
     os.makedirs("plots", exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(40, 40))
-    ax.scatter(*vis_output.T, c=target_bank, cmap="jet")
+    ax.scatter(*feature_bank.T, c=target_bank, cmap="jet")
 
-    if args.filename == "":
-        # use backbone savedir for filename
-        filename = args.model_checkpoint_path.replace("/", "").replace(".", "")
-    else:
-        filename = args.filename
+    filename = args.model_checkpoint_path.split("/")[-2:].replace("/", "").replace(".", "")
 
     plt.savefig("plots/2dvis_{}.png".format(filename))
 

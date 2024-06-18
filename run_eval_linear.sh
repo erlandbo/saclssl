@@ -1,4 +1,3 @@
 python eval_linear.py --dataset tinyimagenet --classifier linear --optimizer sgd --base_lr 30 --weight_decay 0 --epochs 90 --lr_anneal cosine --momentum 0.9 --backbone_checkpoint_path /checkpoint_last.pth
-python eval_linear.py --dataset tinyimagenet --classifier linear --optimizer sgd --base_lr 30 --weight_decay 0 --epochs 90 --lr_anneal cosine --dropout 0.1 --momentum 0.0 --backbone_checkpoint_path /checkpoint_last.pth
-python eval_linear.py --dataset tinyimagenet --classifier linear --optimizer adamw --base_lr 1e-2 --weight_decay 1e-3 --lr_anneal multi_step --epochs 100 --lr_anneal_steps_constant 0.1 --dropout 0.1 --backbone_checkpoint_path /checkpoint_last.pth
+python eval_linear.py --dataset tinyimagenet --classifier linear --optimizer sgd --base_lr 30 --weight_decay 2e-6 --epochs 90 --lr_anneal cosine --momentum 0.9 --backbone_checkpoint_path /checkpoint_last.pth
 python eval_linear.py --dataset tinyimagenet --classifier mlp --optimizer adamw --base_lr 1e-3 --weight_decay 5e-4 --lr_anneal multi_step --epochs 100 --lr_anneal_steps_constant 0.25 --dropout 0.2 --backbone_checkpoint_path /checkpoint_last.pth
