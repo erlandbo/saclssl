@@ -91,7 +91,7 @@ def main():
     fig, ax = plt.subplots(figsize=(40, 40))
     ax.scatter(*feature_bank.T, c=target_bank, cmap="jet")
 
-    filename = args.model_checkpoint_path.split("/")[-2:].replace("/", "").replace(".", "")
+    filename = args.model_checkpoint_path.split("/")[-2].replace("/", "").replace(".", "")
 
     plt.savefig("plots/2dvis_{}.png".format(filename))
 
